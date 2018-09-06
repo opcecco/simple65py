@@ -2,7 +2,7 @@
 
 
 import sys, re
-from collections import Counter
+import pprint
 
 
 class Label:
@@ -27,6 +27,11 @@ class Label:
 			rom_bytes[oref] = self.value - opc
 
 
+	def __repr__(self):
+
+		return str(self.value)
+
+
 class Opcode:
 
 	def __init__(self, implied = None, acc = None, imm = None, zp = None, zp_x = None, zp_y = None, abs = None, abs_x = None, abs_y = None, ind = None, ind_x = None, ind_y = None, off = None):
@@ -44,6 +49,17 @@ class Opcode:
 		self.ind_x = ind_x
 		self.ind_y = ind_y
 		self.off = off
+
+
+	def get_bytes(self, params):
+
+		if params:
+			first_param = param[0]
+			if first_param[0] ==
+		else:
+			return self.implied
+
+		error('Bad addressing mode: %s' % params)
 
 
 label_table = {}
@@ -125,6 +141,13 @@ opcode_table = {
 	'NOP': Opcode(0xEA),
 }
 
+# directive_table = {
+	# '.db': db_directive,
+	# '.dw': dw_directive,
+	# '.org': org_directive,
+	# '.pad': pad_directive,
+# }
+
 
 token_regex = re.compile('(?:(^[A-Za-z_]\w*):)?\s*([\.\w]+)?(?:\s+(.+)$)?')
 param_regex = re.compile('"[^"]+"|;.*$|[^\s,]+')
@@ -133,17 +156,27 @@ prog_counter = 0
 rom_bytes = []
 
 
+def error(message):
+	print(message)
+	exit(-1)
+
+
 def parse_value(param):
 
-	# Parse a value
+	width = 8 if param[0] in '<>' else 16
+
 	if param[0] == '$':
-		return int(param[1:], 16)
+		value = int(param[1:], 16)
 	elif param[0] == '%':
-		return int(param[1:], 2)
+		value = int(param[1:], 2)
 	elif param.isdigit():
-		return int(param)
+		value = int(param)
 	else:
-		return param
+		value = None
+
+	if value and value >= 2 ** width:
+		error('Value too large')
+	return value, width
 
 
 def parse_line(line):
@@ -154,18 +187,23 @@ def parse_line(line):
 	if tokens[0]:
 		name = tokens[0]
 		if name in label_table:
-			error('Label already defined: %s' % name)
+			if label_table[name].value:
+				error('Label already defined: %s' % name)
+			else:
+				label_table[name].value = prog_counter
 		else:
 			label_table[name] = Label(prog_counter)
 
 	# Check if we have an instruction
 	if tokens[1]:
-		instruction = tokens[1]
-		params = [parse_param(param) for param in param_regex.findall(tokens[2].strip()) if param and param[0] != ';'] if tokens[2] else None
+		instruction = tokens[1].upper()
+		params = [p for p in param_regex.findall(tokens[2].strip()) if p and p[0] != ';'] if tokens[2] else None
 		if instruction in opcode_table:
-			print('opcde:\t%s, %s' % (instruction, params))
+			rom_bytes.extend(opcode_table[instruction].get_bytes(params))
+		# elif instruction in directive_table:
+			# directive_table[instruction](params)
 		else:
-			print('drctv:\t%s, %s' % (instruction, params))
+			error('Bad instruction: %s' % line)
 
 
 if __name__ == '__main__':
@@ -173,3 +211,6 @@ if __name__ == '__main__':
 	with open(sys.argv[1], 'r') as src_file:
 		for line in src_file:
 			parse_line(line)
+
+	pprint.pprint(label_table)
+	pprint.pprint(rom_bytes)
