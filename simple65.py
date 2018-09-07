@@ -5,31 +5,35 @@ import sys, re
 import pprint
 
 
-class Label:
-
-	def __init__(self, value = None):
-
-		self.value = value
-		self.high_refs = []
-		self.low_refs = []
-		self.off_refs = []
-		self.off_pc = []
+token_regex = re.compile('(?:([A-Za-z_]\w*):)?(?:\s*([\.\w]+))?(?:\s+([^;]+[^;\s]))?(?:\s*(;.*))?')
+param_split_regex = re.compile(',\s*')
 
 
-	def backfill_references(self):
+class Value:
 
-		# replace label references with real values
-		for href in self.high_refs:
-			rom_bytes[href] = self.value & 0xF0
-		for lref in self.low_refs:
-			rom_bytes[lref] = self.value & 0x0F
-		for oref, opc in zip(self.off_refs, self.off_pc):
-			rom_bytes[oref] = self.value - opc
+	def __init__(self, val_string):
+
+		self.mode = None
+		self.truncation = None
+
+		if val_string[0] == '#':
+			mode = 'imm'
+			val_string.pop(0)
+
+		if val_string[0] == '<':
+			truncation = 'low'
+			val_string.pop(0)
+		elif val_string[0] == '>':
+			truncation = 'high'
+			val_string.pop(0)
+
+		if True:
+			pass
 
 
-	def __repr__(self):
+	def get_bytes(self):
 
-		return str(self.value)
+		return []
 
 
 class Opcode:
@@ -49,20 +53,22 @@ class Opcode:
 		self.ind_x = ind_x
 		self.ind_y = ind_y
 		self.off = off
+		self.length = 1
 
 
-	def get_bytes(self, params):
+class Instruction:
 
-		if params:
-			first_param = param[0]
-			if first_param[0] ==
-		else:
-			return self.implied
+	def __init__(self, opcode, params):
 
-		error('Bad addressing mode: %s' % params)
+		self.opcode = opcode
+		self.params = params
+		self.length = 1
 
 
-label_table = {}
+	def __repr__(self):
+
+		return '%s (%s)' % (self.opcode, self.params)
+
 
 opcode_table = {
 
@@ -141,19 +147,18 @@ opcode_table = {
 	'NOP': Opcode(0xEA),
 }
 
-# directive_table = {
+directive_table = {
 	# '.db': db_directive,
 	# '.dw': dw_directive,
 	# '.org': org_directive,
 	# '.pad': pad_directive,
-# }
+}
 
-
-token_regex = re.compile('(?:(^[A-Za-z_]\w*):)?\s*([\.\w]+)?(?:\s+(.+)$)?')
-param_regex = re.compile('"[^"]+"|;.*$|[^\s,]+')
+label_table = {}
 
 prog_counter = 0
-rom_bytes = []
+instruction_list = []
+current_line = 0
 
 
 def error(message):
@@ -161,49 +166,24 @@ def error(message):
 	exit(-1)
 
 
-def parse_value(param):
-
-	width = 8 if param[0] in '<>' else 16
-
-	if param[0] == '$':
-		value = int(param[1:], 16)
-	elif param[0] == '%':
-		value = int(param[1:], 2)
-	elif param.isdigit():
-		value = int(param)
-	else:
-		value = None
-
-	if value and value >= 2 ** width:
-		error('Value too large')
-	return value, width
-
-
 def parse_line(line):
 
+	global current_line
+	global prog_counter
+
+	current_line += 1
 	tokens = token_regex.match(line.strip()).groups()
 
-	# Check if we have a label
 	if tokens[0]:
 		name = tokens[0]
-		if name in label_table:
-			if label_table[name].value:
-				error('Label already defined: %s' % name)
-			else:
-				label_table[name].value = prog_counter
-		else:
-			label_table[name] = Label(prog_counter)
+		label_table[name] = prog_counter
 
-	# Check if we have an instruction
 	if tokens[1]:
-		instruction = tokens[1].upper()
-		params = [p for p in param_regex.findall(tokens[2].strip()) if p and p[0] != ';'] if tokens[2] else None
-		if instruction in opcode_table:
-			rom_bytes.extend(opcode_table[instruction].get_bytes(params))
-		# elif instruction in directive_table:
-			# directive_table[instruction](params)
-		else:
-			error('Bad instruction: %s' % line)
+		name = tokens[1].upper()
+		params = tokens[2]
+		instr = Instruction(name, params)
+		instruction_list.append(instr)
+		prog_counter += instr.length
 
 
 if __name__ == '__main__':
@@ -212,5 +192,13 @@ if __name__ == '__main__':
 		for line in src_file:
 			parse_line(line)
 
+	pprint.pprint(instruction_list)
 	pprint.pprint(label_table)
-	pprint.pprint(rom_bytes)
+	exit()
+
+	rom_bytes = []
+	for instr in instruction_list:
+		rom_bytes.extend(instr.get_bytes())
+
+	with open(sys.argv[2], 'wb') as rom_file:
+		rom_file.write(bytearray(rom_bytes))
