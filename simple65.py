@@ -13,9 +13,11 @@ class Value:
 
 	def __init__(self, val_string):
 
-		self.mode = None
+		self.mode = 'abs'
 		self.truncation = None
 
+		if val_string.upper() == 'A':
+			self.mode = 'acc'
 		if val_string[0] == '#':
 			mode = 'imm'
 			val_string.pop(0)
