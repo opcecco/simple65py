@@ -75,7 +75,12 @@ class Operand:
 		if self.mode == 'implied':
 			return ()
 		elif self.mode == 'off':
-			return (self.value.get_bytes()[0] & 0x0F,)
+			if self.value.length == 2:
+				bytes = self.value.get_bytes()
+				branch_addr = bytes[0] + (bytes[1] << 8)
+				return [(branch_addr - self.pc - 2) % 256]
+			else:
+				return self.value.get_bytes()
 		else:
 			return self.value.get_bytes()
 
@@ -255,14 +260,14 @@ if __name__ == '__main__':
 				print('Error: line %d' % current_line)
 				raise
 
-	pprint.pprint(instruction_list)
-	pprint.pprint(['%s: %X' % (name, label_table[name]) for name in label_table])
+	# pprint.pprint(instruction_list)
+	# pprint.pprint(['%s: %X' % (name, label_table[name]) for name in label_table])
 
 	rom_bytes = []
 	for instr in instruction_list:
 		rom_bytes.extend(instr.get_bytes())
 
-	pprint.pprint(['%04X: %02X' % (i, byte) for i, byte in enumerate(rom_bytes)])
+	# pprint.pprint(['%04X: %02X' % (i, byte) for i, byte in enumerate(rom_bytes)])
 
 	with open(sys.argv[2], 'wb') as rom_file:
 		rom_file.write(bytearray(rom_bytes))

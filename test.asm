@@ -43,7 +43,7 @@ LoadPalettes:
   STA $2006             ; write the low byte of $3F00 address
   LDX #$00              ; start out at 0
 LoadPalettesLoop:
-  LDA palette, x        ; load data from address (palette + the value in x)
+  LDA <palette, x        ; load data from address (palette + the value in x)
                           ; 1st time through loop it will load palette+0
                           ; 2nd time through loop it will load palette+1
                           ; 3rd time through loop it will load palette+2
@@ -59,7 +59,7 @@ LoadPalettesLoop:
 LoadSprites:
   LDX #$00              ; start at 0
 LoadSpritesLoop:
-  LDA sprites, x        ; load data from address (sprites +  x)
+  LDA <sprites, x        ; load data from address (sprites +  x)
   STA $0200, x          ; store into RAM address ($0200 + x)
   INX                   ; X = X + 1
   CPX #$10              ; Compare X to hex $20, decimal 32
