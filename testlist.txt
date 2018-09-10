@@ -1,0 +1,182 @@
+                                palette = 9000
+                                sprites = 9000
+                                .base 0
+00000                           RESET:
+00000 78                          SEI          ; disable IRQs
+00001 D8                          CLD          ; disable decimal mode
+00002 A2 40                       LDX #$40
+00004 8E 17 40                    STX $4017    ; disable APU frame IRQ
+00007 A2 FF                       LDX #$FF
+00009 9A                          TXS          ; Set up stack
+0000A E8                          INX          ; now X = 0
+0000B 8E 00 20                    STX $2000    ; disable NMI
+0000E 8E 01 20                    STX $2001    ; disable rendering
+00011 8E 10 40                    STX $4010    ; disable DMC IRQs
+00014                           
+00014                           vblankwait1:       ; First wait for vblank to make sure PPU is ready
+00014 2C 02 20                    BIT $2002
+00017 10 FB                       BPL vblankwait1
+00019                           
+00019                           clrmem:
+00019 A9 00                       LDA #$00
+0001B 95 00                       STA $0000, x
+0001D 9D 00 01                    STA $0100, x
+00020 9D 00 02                    STA $0200, x
+00023 9D 00 04                    STA $0400, x
+00026 9D 00 05                    STA $0500, x
+00029 9D 00 06                    STA $0600, x
+0002C 9D 00 07                    STA $0700, x
+0002F A9 FE                       LDA #$FE
+00031 9D 00 03                    STA $0300, x
+00034 E8                          INX
+00035 D0 E2                       BNE clrmem
+00037                           
+00037                           vblankwait2:      ; Second wait for vblank, PPU is ready after this
+00037 2C 02 20                    BIT $2002
+0003A 10 FB                       BPL vblankwait2
+0003C                           
+0003C                           
+0003C                           LoadPalettes:
+0003C AD 02 20                    LDA $2002             ; read PPU status to reset the high/low latch
+0003F A9 3F                       LDA #$3F
+00041 8D 06 20                    STA $2006             ; write the high byte of $3F00 address
+00044 A9 00                       LDA #$00
+00046 8D 06 20                    STA $2006             ; write the low byte of $3F00 address
+00049 A2 00                       LDX #$00              ; start out at 0
+0004B                           LoadPalettesLoop:
+0004B BD 28 23                    LDA palette, x        ; load data from address (palette + the value in x)
+0004E                                                     ; 1st time through loop it will load palette+0
+0004E                                                     ; 2nd time through loop it will load palette+1
+0004E                                                     ; 3rd time through loop it will load palette+2
+0004E                                                     ; etc
+0004E 8D 07 20                    STA $2007             ; write to PPU
+00051 E8                          INX                   ; X = X + 1
+00052 E0 20                       CPX #$20              ; Compare X to hex $10, decimal 16 - copying 16 bytes = 4 sprites
+00054 D0 F5                       BNE LoadPalettesLoop  ; Branch to LoadPalettesLoop if compare was Not Equal to zero
+00056                                                   ; if compare was equal to 32, keep going down
+00056                           
+00056                           
+00056                           
+00056                           LoadSprites:
+00056 A2 00                       LDX #$00              ; start at 0
+00058                           LoadSpritesLoop:
+00058 BD 28 23                    LDA sprites, x        ; load data from address (sprites +  x)
+0005B 9D 00 02                    STA $0200, x          ; store into RAM address ($0200 + x)
+0005E E8                          INX                   ; X = X + 1
+0005F E0 10                       CPX #$10              ; Compare X to hex $20, decimal 32
+00061 D0 F5                       BNE LoadSpritesLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
+00063                                                   ; if compare was equal to 32, keep going down
+00063                           
+00063                           
+00063                           
+00063 A9 80                       LDA #%10000000   ; enable NMI, sprites from Pattern Table 1
+00065 8D 00 20                    STA $2000
+00068                           
+00068 A9 10                       LDA #%00010000   ; enable sprites
+0006A 8D 01 20                    STA $2001
+0006D                           
+0006D                           Forever:
+0006D 4C 6D 00                    JMP Forever     ;jump back to Forever, infinite loop
+00070                           
+00070                           
+00070                           
+00070                           NMI:
+00070 A9 00                       LDA #$00
+00072 8D 03 20                    STA $2003       ; set the low byte (00) of the RAM address
+00075 A9 02                       LDA #$02
+00077 8D 14 40                    STA $4014       ; set the high byte (02) of the RAM address, start the transfer
+0007A                           
+0007A                           
+0007A                           LatchController:
+0007A A9 01                       LDA #$01
+0007C 8D 16 40                    STA $4016
+0007F A9 00                       LDA #$00
+00081 8D 16 40                    STA $4016       ; tell both the controllers to latch buttons
+00084                           
+00084 AD 16 40                    LDA $4016       ; pop A
+00087 AD 16 40                    LDA $4016       ; pop B
+0008A AD 16 40                    LDA $4016       ; pop Select
+0008D AD 16 40                    LDA $4016       ; pop Start
+00090                           
+00090                           ReadUp:
+00090 AD 16 40                    LDA $4016       ; player 1 - Up
+00093 29 01                       AND #%00000001  ; only look at bit 0
+00095 F0 13                       BEQ ReadUpDone   ; branch to ReadUpDone if button is NOT pressed (0)
+00097                                             ; add instructions here to do something when button IS pressed (1)
+00097 A2 00                       LDX #$00
+00099                           ReadUpLoop:
+00099 BD 00 02                    LDA $0200, x       ; load sprite Y position
+0009C 38                          SEC             ; make sure carry flag is set
+0009D E9 01                       SBC #$01        ; A = A - 1
+0009F 9D 00 02                    STA $0200, x       ; save sprite Y position
+000A2 E8                          INX
+000A3 E8                          INX
+000A4 E8                          INX
+000A5 E8                          INX
+000A6 E0 10                       CPX #$10              ; Compare X to hex $20, decimal 32
+000A8 D0 EF                       BNE ReadUpLoop
+000AA                           ReadUpDone:        ; handling this button is done
+000AA                           
+000AA                           
+000AA                           ReadDown:
+000AA AD 16 40                    LDA $4016       ; player 1 - Down
+000AD 29 01                       AND #%00000001  ; only look at bit 0
+000AF F0 13                       BEQ ReadDownDone   ; branch to ReadDownDone if button is NOT pressed (0)
+000B1                                             ; add instructions here to do something when button IS pressed (1)
+000B1 A2 00                       LDX #$00
+000B3                           ReadDownLoop:
+000B3 BD 00 02                    LDA $0200, x       ; load sprite Y position
+000B6 18                          CLC             ; make sure the carry flag is clear
+000B7 69 01                       ADC #$01        ; A = A + 1
+000B9 9D 00 02                    STA $0200, x       ; save sprite Y position
+000BC E8                          INX
+000BD E8                          INX
+000BE E8                          INX
+000BF E8                          INX
+000C0 E0 10                       CPX #$10
+000C2 D0 EF                       BNE ReadDownLoop
+000C4                           ReadDownDone:        ; handling this button is done
+000C4                           
+000C4                           
+000C4                           ReadLeft:
+000C4 AD 16 40                    LDA $4016       ; player 1 - Left
+000C7 29 01                       AND #%00000001  ; only look at bit 0
+000C9 F0 13                       BEQ ReadLeftDone   ; branch to ReadLeftDone if button is NOT pressed (0)
+000CB                                             ; add instructions here to do something when button IS pressed (1)
+000CB A2 00                       LDX #$00
+000CD                           ReadLeftLoop:
+000CD BD 03 02                    LDA $0203, x       ; load sprite X position
+000D0 38                          SEC             ; make sure carry flag is set
+000D1 E9 01                       SBC #$01        ; A = A - 1
+000D3 9D 03 02                    STA $0203, x       ; save sprite X position
+000D6 E8                          INX
+000D7 E8                          INX
+000D8 E8                          INX
+000D9 E8                          INX
+000DA E0 10                       CPX #$10
+000DC D0 EF                       BNE ReadLeftLoop
+000DE                           ReadLeftDone:        ; handling this button is done
+000DE                           
+000DE                           
+000DE                           ReadRight:
+000DE AD 16 40                    LDA $4016       ; player 1 - Right
+000E1 29 01                       AND #%00000001  ; only look at bit 0
+000E3 F0 13                       BEQ ReadRightDone   ; branch to ReadRightDone if button is NOT pressed (0)
+000E5                                             ; add instructions here to do something when button IS pressed (1)
+000E5 A2 00                       LDX #$00
+000E7                           ReadRightLoop:
+000E7 BD 03 02                    LDA $0203, x       ; load sprite X position
+000EA 18                          CLC             ; make sure the carry flag is clear
+000EB 69 01                       ADC #$01        ; A = A + 1
+000ED 9D 03 02                    STA $0203, x       ; save sprite X position
+000F0 E8                          INX
+000F1 E8                          INX
+000F2 E8                          INX
+000F3 E8                          INX
+000F4 E0 10                       CPX #$10
+000F6 D0 EF                       BNE ReadRightLoop
+000F8                           ReadRightDone:        ; handling this button is done
+000F8                           
+000F8                           
+000F8                           
+000F8 40                          RTI             ; return from interrupt

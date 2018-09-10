@@ -1,4 +1,5 @@
-
+palette:
+sprites:
 RESET:
   SEI          ; disable IRQs
   CLD          ; disable decimal mode
