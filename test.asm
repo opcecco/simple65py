@@ -1,5 +1,5 @@
-palette:
-sprites:
+.org $C000
+
 RESET:
   SEI          ; disable IRQs
   CLD          ; disable decimal mode
@@ -179,3 +179,14 @@ ReadRightDone:        ; handling this button is done
 
 
   RTI             ; return from interrupt
+
+palette:
+	.db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+	.db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+sprites:
+	.db $00, $00, $00, $00
+	.db $00, $00, $00, $00
+	.db $00, $00, $00, $00
+	.db $00, $00, $00, $00
+
+vectors: .dw sprites

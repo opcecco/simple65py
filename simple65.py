@@ -5,10 +5,15 @@ import sys, re
 import pprint
 
 
-token_regex = re.compile('(?:([A-Za-z_]\w*):)?(?:\s*([\.\w]+))?(?:\s+([^;]+[^;\s]))?(?:\s*(;.*))?')
-operand_regex = re.compile('([#\(])?([<>$%\w]+)(\))?(?:,\s*([XxYy]))?(\))?')
-value_regex = re.compile('([<>])?([%$])?(\w+)')
+token_regex = re.compile('(?:([A-Za-z_]\w*):)?(?:\s*([\.\w]+))?(?:\s+([^;]*[^;\s]))?(?:\s*(;.*))?')
+operand_regex = re.compile('([#\(])?([<>$%\'\w]+)(\))?(?:,\s*([XxYy]))?(\))?')
+value_regex = re.compile('([<>])?([%$])?(\')?(\w+)(\')?')
 param_split_regex = re.compile(',\s*')
+
+label_table = {}
+instruction_list = []
+prog_counter = 0
+current_line = 0
 
 
 class Opcode:
@@ -30,118 +35,6 @@ class Opcode:
 			'ind_y':   ind_y,
 			'off':     off,
 		}
-
-
-class Operand:
-
-	mode_dict = {
-		('#',  None, None, None, 1): 'imm',
-		(None, None, None, None, 1): 'zp',
-		(None, None, 'X',  None, 1): 'zp_x',
-		(None, None, 'Y',  None, 1): 'zp_y',
-		(None, None, None, None, 2): 'abs',
-		(None, None, 'X',  None, 2): 'abs_x',
-		(None, None, 'Y',  None, 2): 'abs_y',
-		('(',  ')',  None, None, 2): 'ind',
-		('(',  None, 'X',  ')',  1): 'ind_x',
-		('(',  ')',  'Y',  None, 1): 'ind_y',
-	}
-
-
-	def __init__(self, oper_str, offset = False):
-
-		self.pc = prog_counter
-
-		if oper_str:
-			tokens = operand_regex.match(oper_str).groups()
-			self.value = Value(tokens[1])
-
-			if offset:
-				self.length = 1
-				self.mode = 'off'
-			else:
-				self.length = self.value.length
-				mode_key = (tokens[0], tokens[2], tokens[3].upper() if tokens[3] else None, tokens[4], self.value.length)
-				self.mode = Operand.mode_dict[mode_key]
-
-		else:
-			self.value = None
-			self.length = 0
-			self.mode = 'implied'
-
-
-	def get_bytes(self):
-
-		if self.mode == 'implied':
-			return ()
-		elif self.mode == 'off':
-			if self.value.length == 2:
-				bytes = self.value.get_bytes()
-				branch_addr = bytes[0] + (bytes[1] << 8)
-				return [(branch_addr - self.pc - 2) % 256]
-			else:
-				return self.value.get_bytes()
-		else:
-			return self.value.get_bytes()
-
-
-	def __repr__(self):
-
-		return str((self.mode, self.value,))
-
-
-class Value:
-
-	def __init__(self, val_str):
-
-		tokens = value_regex.match(val_str).groups()
-		self.truncation = 1 if tokens[0] == '>' else -1 if tokens[0] == '<' else 0
-		base = 16 if tokens[1] == '$' else 2 if tokens[1] == '%' else 10 if tokens[2].isdigit() else None
-		self.literal = int(tokens[2], base) if base is not None else None
-		self.label = tokens[2] if self.literal is None else None
-		self.length = 1 if self.truncation != 0 or (self.literal is not None and self.literal < 256) else 2
-
-
-	def get_bytes(self):
-
-		out_val = self.literal if self.literal is not None else label_table[self.label]
-
-		if self.truncation == -1:
-			out_val &= 0xFF
-		elif self.truncation == 1:
-			out_val >>= 8
-
-		if self.length == 1:
-			return [out_val]
-		else:
-			return [out_val & 0xFF, out_val >> 8]
-
-
-	def __repr__(self):
-
-		return str(vars(self))
-
-
-class Instruction:
-
-	def __init__(self, opcode_str, operand_str):
-
-		self.opcode_str = opcode_str
-		self.opcode = opcode_table[opcode_str]
-		self.operand = Operand(operand_str, offset = self.opcode.byte['off'])
-		self.length = self.opcode.length + self.operand.length
-
-
-	def get_bytes(self):
-
-		out_bytes = [self.opcode.byte[self.operand.mode]]
-		out_bytes.extend(self.operand.get_bytes())
-		return out_bytes
-
-
-	def __repr__(self):
-
-		return str((self.opcode_str, self.operand,))
 
 
 opcode_table = {
@@ -222,10 +115,160 @@ opcode_table = {
 }
 
 
-label_table = {}
-instruction_list = []
-prog_counter = 0
-current_line = 0
+def org_directive(param):
+
+	global prog_counter
+
+	prog_counter = Value(param).literal
+
+
+def pad_directive(param):
+
+	global prog_counter
+
+	while prog_counter < Value(param).literal:
+		instruction_list.append(Value('0'))
+		prog_counter += 1
+
+
+def db_directive(param):
+
+	global prog_counter
+
+	params = param_split_regex.split(param)
+	prog_counter += len(params)
+	instruction_list.extend(Value(p, length = 1) for p in params)
+
+
+def dw_directive(param):
+
+	global prog_counter
+
+	params = param_split_regex.split(param)
+	prog_counter += len(params)
+	instruction_list.extend(Value(p, length = 2) for p in params)
+
+
+directive_table = {
+	'.ORG': org_directive,
+	'.PAD': pad_directive,
+	'.DB': db_directive,
+	'.DW': dw_directive,
+}
+
+
+class Value:
+
+	def __init__(self, val_str, length = None):
+
+		tokens = value_regex.match(val_str).groups()
+		self.truncation = 1 if tokens[0] == '>' else -1 if tokens[0] == '<' else 0
+		base = 16 if tokens[1] == '$' else 2 if tokens[1] == '%' else 10 if tokens[3].isdigit() else None
+		self.literal = int(tokens[3], base) if base is not None else ord(tokens[3]) if tokens[2] and tokens[4] else None
+		self.label = tokens[3] if self.literal is None else None
+		self.length = length if length is not None else 1 if self.truncation != 0 or (self.literal is not None and self.literal < 256) else 2
+
+
+	def get_bytes(self):
+
+		out_val = self.literal if self.literal is not None else label_table[self.label]
+
+		if self.truncation == -1:
+			out_val &= 0xFF
+		elif self.truncation == 1:
+			out_val >>= 8
+
+		if self.length == 1:
+			return [out_val]
+		else:
+			return [out_val & 0xFF, out_val >> 8]
+
+
+	def __repr__(self):
+
+		return str(vars(self))
+
+
+class Operand:
+
+	mode_dict = {
+		('#',  None, None, None, 1): 'imm',
+		(None, None, None, None, 1): 'zp',
+		(None, None, 'X',  None, 1): 'zp_x',
+		(None, None, 'Y',  None, 1): 'zp_y',
+		(None, None, None, None, 2): 'abs',
+		(None, None, 'X',  None, 2): 'abs_x',
+		(None, None, 'Y',  None, 2): 'abs_y',
+		('(',  ')',  None, None, 2): 'ind',
+		('(',  None, 'X',  ')',  1): 'ind_x',
+		('(',  ')',  'Y',  None, 1): 'ind_y',
+	}
+
+
+	def __init__(self, oper_str, offset = False):
+
+		self.pc = prog_counter
+
+		if oper_str:
+			tokens = operand_regex.match(oper_str).groups()
+			self.value = Value(tokens[1])
+
+			if offset:
+				self.length = 1
+				self.mode = 'off'
+			else:
+				self.length = self.value.length
+				mode_key = (tokens[0], tokens[2], tokens[3].upper() if tokens[3] else None, tokens[4], self.value.length)
+				self.mode = Operand.mode_dict[mode_key]
+
+		else:
+			self.value = None
+			self.length = 0
+			self.mode = 'implied'
+
+
+	def get_bytes(self):
+
+		if self.mode == 'implied':
+			return ()
+		elif self.mode == 'off':
+			if self.value.length == 2:
+				bytes = self.value.get_bytes()
+				branch_addr = bytes[0] + (bytes[1] << 8)
+				return [(branch_addr - self.pc - 2) % 256]
+			else:
+				return self.value.get_bytes()
+		else:
+			return self.value.get_bytes()
+
+
+	def __repr__(self):
+
+		return str((self.mode, self.value,))
+
+
+class Instruction:
+
+	def __init__(self, opcode_str, operand_str):
+
+		self.opcode_str = opcode_str
+
+		self.directive = None
+		self.opcode = opcode_table[opcode_str]
+		self.operand = Operand(operand_str, offset = self.opcode.byte['off'])
+		self.length = self.opcode.length + self.operand.length
+
+
+	def get_bytes(self):
+
+		out_bytes = [self.opcode.byte[self.operand.mode]]
+		out_bytes.extend(self.operand.get_bytes())
+		return out_bytes
+
+
+	def __repr__(self):
+
+		return str((self.opcode_str, self.operand,))
 
 
 def parse_line(line):
@@ -243,11 +286,15 @@ def parse_line(line):
 			label_table[name] = prog_counter
 
 		if tokens[1]:
-			opcode = tokens[1].upper()
-			operand = tokens[2]
-			instr = Instruction(opcode, operand)
-			instruction_list.append(instr)
-			prog_counter += instr.length
+			instr_name = tokens[1].upper()
+			param = tokens[2]
+
+			if instr_name in opcode_table:
+				instr = Instruction(instr_name, param)
+				instruction_list.append(instr)
+				prog_counter += instr.length
+			else:
+				directive_table[instr_name](param)
 
 
 if __name__ == '__main__':
@@ -266,8 +313,6 @@ if __name__ == '__main__':
 	rom_bytes = []
 	for instr in instruction_list:
 		rom_bytes.extend(instr.get_bytes())
-
-	# pprint.pprint(['%04X: %02X' % (i, byte) for i, byte in enumerate(rom_bytes)])
 
 	with open(sys.argv[2], 'wb') as rom_file:
 		rom_file.write(bytearray(rom_bytes))
