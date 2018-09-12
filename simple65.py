@@ -8,7 +8,7 @@ import pprint
 token_regex = re.compile('(?:([A-Za-z_]\w*):)?(?:\s*([\.\w]+))?(?:\s+([^;]*[^;\s]))?(?:\s*(;.*))?')
 operand_regex = re.compile('([#\(])?([<>$%\'\w]+)(\))?(?:,\s*([XxYy]))?(\))?')
 value_regex = re.compile('([<>])?([%$])?(\')?(\w+)(\')?')
-param_split_regex = re.compile(',\s*')
+param_split_regex = re.compile('[,\s]\s*')
 
 label_table = {}
 instruction_list = []
@@ -21,20 +21,23 @@ class Opcode:
 	def __init__(self, implied = None, imm = None, zp = None, zp_x = None, zp_y = None, abs = None, abs_x = None, abs_y = None, ind = None, ind_x = None, ind_y = None, off = None):
 
 		self.length = 1
-		self.byte = {
-			'implied': implied,
-			'imm':     imm,
-			'zp':      zp,
-			'zp_x':    zp_x,
-			'zp_y':    zp_y,
-			'abs':     abs,
-			'abs_x':   abs_x,
-			'abs_y':   abs_y,
-			'ind':     ind,
-			'ind_x':   ind_x,
-			'ind_y':   ind_y,
-			'off':     off,
-		}
+		self.implied = implied
+		self.imm     = imm
+		self.zp      = zp
+		self.zp_x    = zp_x
+		self.zp_y    = zp_y
+		self.abs     = abs
+		self.abs_x   = abs_x
+		self.abs_y   = abs_y
+		self.ind     = ind
+		self.ind_x   = ind_x
+		self.ind_y   = ind_y
+		self.off     = off
+
+
+	def __getitem__(self, name):
+
+		return getattr(self, name)
 
 
 opcode_table = {
@@ -149,11 +152,30 @@ def dw_directive(param):
 	instruction_list.extend(Value(p, length = 2) for p in params)
 
 
+def def_directive(param):
+
+	params = param_split_regex.split(param)
+	name = params[0]
+	if name not in label_table:
+		label_table[name] = Value(params[1]).literal
+	else:
+		raise
+
+
+def rs_directive(param):
+
+	global prog_counter
+
+	prog_counter += Value(param).literal
+
+
 directive_table = {
 	'.ORG': org_directive,
 	'.PAD': pad_directive,
 	'.DB': db_directive,
 	'.DW': dw_directive,
+	'.DEF': def_directive,
+	'.RS': rs_directive
 }
 
 
@@ -255,13 +277,13 @@ class Instruction:
 
 		self.directive = None
 		self.opcode = opcode_table[opcode_str]
-		self.operand = Operand(operand_str, offset = self.opcode.byte['off'])
+		self.operand = Operand(operand_str, offset = self.opcode['off'])
 		self.length = self.opcode.length + self.operand.length
 
 
 	def get_bytes(self):
 
-		out_bytes = [self.opcode.byte[self.operand.mode]]
+		out_bytes = [self.opcode[self.operand.mode]]
 		out_bytes.extend(self.operand.get_bytes())
 		return out_bytes
 
@@ -283,7 +305,10 @@ def parse_line(line):
 
 		if tokens[0]:
 			name = tokens[0]
-			label_table[name] = prog_counter
+			if name not in label_table:
+				label_table[name] = prog_counter
+			else:
+				raise
 
 		if tokens[1]:
 			instr_name = tokens[1].upper()

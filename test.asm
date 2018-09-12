@@ -1,3 +1,11 @@
+;Variables
+
+.org $0000
+
+temp1:	.rs 1
+temp2:	.rs 1
+temp3:	.rs 1
+
 .org $C000
 
 RESET:
