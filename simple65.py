@@ -169,13 +169,31 @@ def rs_directive(param):
 	prog_counter += Value(param).literal
 
 
+def include_directive(param):
+
+	parse_file(param)
+
+
+def incbin_directive(param):
+
+	global prog_counter
+
+	with open(param, 'rb') as bin_file:
+		bytes = bin_file.read()
+
+	instruction_list.extend(Value(b, length = 1) for b in bytes)
+	prog_counter += len(bytes)
+
+
 directive_table = {
 	'.ORG': org_directive,
 	'.PAD': pad_directive,
 	'.DB': db_directive,
 	'.DW': dw_directive,
 	'.DEF': def_directive,
-	'.RS': rs_directive
+	'.RS': rs_directive,
+	'.INCLUDE': include_directive,
+	'.INCBIN': incbin_directive,
 }
 
 
@@ -183,12 +201,18 @@ class Value:
 
 	def __init__(self, val_str, length = None):
 
-		tokens = value_regex.match(val_str).groups()
-		self.truncation = 1 if tokens[0] == '>' else -1 if tokens[0] == '<' else 0
-		base = 16 if tokens[1] == '$' else 2 if tokens[1] == '%' else 10 if tokens[3].isdigit() else None
-		self.literal = int(tokens[3], base) if base is not None else ord(tokens[3]) if tokens[2] and tokens[4] else None
-		self.label = tokens[3] if self.literal is None else None
-		self.length = length if length is not None else 1 if self.truncation != 0 or (self.literal is not None and self.literal < 256) else 2
+		if isinstance(val_str, int):
+			self.truncation = 0
+			self.literal = val_str
+			self.label = None
+			self.length = length
+		else:
+			tokens = value_regex.match(val_str).groups()
+			self.truncation = 1 if tokens[0] == '>' else -1 if tokens[0] == '<' else 0
+			base = 16 if tokens[1] == '$' else 2 if tokens[1] == '%' else 10 if tokens[3].isdigit() else None
+			self.literal = int(tokens[3], base) if base is not None else ord(tokens[3]) if tokens[2] and tokens[4] else None
+			self.label = tokens[3] if self.literal is None else None
+			self.length = length if length is not None else 1 if self.truncation != 0 or (self.literal is not None and self.literal < 256) else 2
 
 
 	def get_bytes(self):
@@ -322,15 +346,16 @@ def parse_line(line):
 				directive_table[instr_name](param)
 
 
+def parse_file(path):
+
+	with open(path, 'r') as src_file:
+		for line in src_file:
+			parse_line(line)
+
+
 if __name__ == '__main__':
 
-	with open(sys.argv[1], 'r') as src_file:
-		for line in src_file:
-			try:
-				parse_line(line)
-			except:
-				print('Error: line %d' % current_line)
-				raise
+	parse_file(sys.argv[1])
 
 	# pprint.pprint(instruction_list)
 	# pprint.pprint(['%s: %X' % (name, label_table[name]) for name in label_table])
