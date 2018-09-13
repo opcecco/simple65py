@@ -10,10 +10,17 @@ operand_regex = re.compile('([#\(])?([<>$%\'\w]+)(\))?(?:,\s*([XxYy]))?(\))?')
 value_regex = re.compile('([<>])?([%$])?(\')?(\w+)(\')?')
 param_split_regex = re.compile('[,\s]\s*')
 
+file_name_stack = []
+line_count_stack = []
 label_table = {}
 instruction_list = []
 prog_counter = 0
-current_line = 0
+
+
+def error(file, line, message):
+	print('ERROR!')
+	print('%s (%d): %s' % (file, line, message))
+	exit(-1)
 
 
 class Opcode:
@@ -122,7 +129,11 @@ def org_directive(param):
 
 	global prog_counter
 
-	prog_counter = Value(param).literal
+	new_pc = Value(param).literal
+	if new_pc is not None:
+		prog_counter = Value(param).literal
+	else:
+		raise TypeError()
 
 
 def pad_directive(param):
@@ -130,7 +141,7 @@ def pad_directive(param):
 	global prog_counter
 
 	while prog_counter < Value(param).literal:
-		instruction_list.append(Value('0'))
+		instruction_list.append(Value(0))
 		prog_counter += 1
 
 
@@ -159,7 +170,7 @@ def def_directive(param):
 	if name not in label_table:
 		label_table[name] = Value(params[1]).literal
 	else:
-		raise
+		raise Exception('Label "%s" already exists' % name)
 
 
 def rs_directive(param):
@@ -201,6 +212,9 @@ class Value:
 
 	def __init__(self, val_str, length = None):
 
+		self.file = current_file
+		self.line = current_line
+
 		if isinstance(val_str, int):
 			self.truncation = 0
 			self.literal = val_str
@@ -217,7 +231,10 @@ class Value:
 
 	def get_bytes(self):
 
-		out_val = self.literal if self.literal is not None else label_table[self.label]
+		try:
+			out_val = self.literal if self.literal is not None else label_table[self.label]
+		except KeyError:
+			error(self.file, self.line, 'Label not found "%s"' % self.label)
 
 		if self.truncation == -1:
 			out_val &= 0xFF
@@ -228,11 +245,6 @@ class Value:
 			return [out_val]
 		else:
 			return [out_val & 0xFF, out_val >> 8]
-
-
-	def __repr__(self):
-
-		return str(vars(self))
 
 
 class Operand:
@@ -253,10 +265,16 @@ class Operand:
 
 	def __init__(self, oper_str, offset = False):
 
+		self.file = current_file
+		self.line = current_line
 		self.pc = prog_counter
 
 		if oper_str:
-			tokens = operand_regex.match(oper_str).groups()
+			try:
+				tokens = operand_regex.match(oper_str).groups()
+			except AttributeError:
+				error(self.file, self.line, 'Unable to parse operand')
+
 			self.value = Value(tokens[1])
 
 			if offset:
@@ -265,7 +283,10 @@ class Operand:
 			else:
 				self.length = self.value.length
 				mode_key = (tokens[0], tokens[2], tokens[3].upper() if tokens[3] else None, tokens[4], self.value.length)
-				self.mode = Operand.mode_dict[mode_key]
+				try:
+					self.mode = Operand.mode_dict[mode_key]
+				except KeyError:
+					error(self.file, self.line, 'Invalid addressing mode')
 
 		else:
 			self.value = None
@@ -288,16 +309,12 @@ class Operand:
 			return self.value.get_bytes()
 
 
-	def __repr__(self):
-
-		return str((self.mode, self.value,))
-
-
 class Instruction:
 
 	def __init__(self, opcode_str, operand_str):
 
-		self.opcode_str = opcode_str
+		self.file = current_file
+		self.line = current_line
 
 		self.directive = None
 		self.opcode = opcode_table[opcode_str]
@@ -312,17 +329,15 @@ class Instruction:
 		return out_bytes
 
 
-	def __repr__(self):
-
-		return str((self.opcode_str, self.operand,))
-
-
 def parse_line(line):
 
-	global current_line
 	global prog_counter
+	global current_file
+	global current_line
 
-	current_line += 1
+	current_file = file_name_stack[-1]
+	current_line = line_count_stack[-1]
+
 	tokens = token_regex.match(line.strip()).groups()
 
 	if tokens:
@@ -332,7 +347,7 @@ def parse_line(line):
 			if name not in label_table:
 				label_table[name] = prog_counter
 			else:
-				raise
+				error(current_file, current_line, 'Label already exists "%s"' % name)
 
 		if tokens[1]:
 			instr_name = tokens[1].upper()
@@ -342,27 +357,51 @@ def parse_line(line):
 				instr = Instruction(instr_name, param)
 				instruction_list.append(instr)
 				prog_counter += instr.length
+			elif instr_name in directive_table:
+				try:
+					directive_table[instr_name](param)
+				except TypeError:
+					error(current_file, current_line, 'Value must be literal')
 			else:
-				directive_table[instr_name](param)
+				error(current_file, current_line, 'Invalid instruction "%s"' % tokens[1])
 
 
 def parse_file(path):
 
+	file_name_stack.append(path)
+	line_count_stack.append(0)
+
 	with open(path, 'r') as src_file:
 		for line in src_file:
+			line_count_stack[-1] += 1
 			parse_line(line)
+
+	file_name_stack.pop()
+	line_count_stack.pop()
 
 
 if __name__ == '__main__':
 
-	parse_file(sys.argv[1])
+	try:
+		asm_file_name = sys.argv[1]
+		out_file_name = sys.argv[2]
+	except IndexError:
+		print('usage: simple65.py <input file> <output file>')
+		exit(-1)
 
-	# pprint.pprint(instruction_list)
+	print('Pass 1...')
+	parse_file(asm_file_name)
+
 	# pprint.pprint(['%s: %X' % (name, label_table[name]) for name in label_table])
 
+	print('Pass 2...')
 	rom_bytes = []
 	for instr in instruction_list:
-		rom_bytes.extend(instr.get_bytes())
+		bytes = instr.get_bytes()
+		if any(b > 256 for b in bytes):
+			error(instr.file, instr.line, 'Value out of range')
+		rom_bytes.extend(bytes)
 
-	with open(sys.argv[2], 'wb') as rom_file:
+	print('Writing %d bytes to %s' % (len(rom_bytes), out_file_name))
+	with open(out_file_name, 'wb') as rom_file:
 		rom_file.write(bytearray(rom_bytes))
