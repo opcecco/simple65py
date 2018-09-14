@@ -5,9 +5,9 @@ import sys
 import re
 
 
-token_regex = re.compile('(?:([A-Za-z_][\w\.]*):)?(?:\s*([\.\w]+))?(?:\s+([^;]*[^;\s]))?(?:\s*(;.*))?')
-operand_regex = re.compile('([#\(])?([<>$%\'\w.]+)(\))?(?:,\s*([XxYy]))?(\))?')
-value_regex = re.compile('([<>])?([%$])?(\')?([\w\.]+)(\')?')
+token_regex = re.compile('(?:([A-Za-z_][\w\.\-\+]*):)?(?:\s*([^;\s]+))?(?:\s+([^;]*[^;\s]))?(?:\s*(;.*))?')
+operand_regex = re.compile('([#\(])?([^,]+)(\))?(?:,\s*(.+))?(\))?')
+value_regex = re.compile('([<>])?([%$])?(\')?(.+)(\')?')
 param_split_regex = re.compile('[,\s]\s*')
 
 file_name_stack = []
