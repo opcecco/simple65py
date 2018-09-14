@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
 
-import sys, re
-import pprint
+import sys
+import re
 
 
-token_regex = re.compile('(?:([A-Za-z_]\w*):)?(?:\s*([\.\w]+))?(?:\s+([^;]*[^;\s]))?(?:\s*(;.*))?')
-operand_regex = re.compile('([#\(])?([<>$%\'\w]+)(\))?(?:,\s*([XxYy]))?(\))?')
-value_regex = re.compile('([<>])?([%$])?(\')?(\w+)(\')?')
+token_regex = re.compile('(?:([A-Za-z_][\w\.]*):)?(?:\s*([\.\w]+))?(?:\s+([^;]*[^;\s]))?(?:\s*(;.*))?')
+operand_regex = re.compile('([#\(])?([<>$%\'\w.]+)(\))?(?:,\s*([XxYy]))?(\))?')
+value_regex = re.compile('([<>])?([%$])?(\')?([\w\.]+)(\')?')
 param_split_regex = re.compile('[,\s]\s*')
 
 file_name_stack = []
@@ -131,7 +131,7 @@ def org_directive(param):
 
 	new_pc = Value(param).literal
 	if new_pc is not None:
-		prog_counter = Value(param).literal
+		prog_counter = new_pc
 	else:
 		raise TypeError()
 
@@ -140,9 +140,13 @@ def pad_directive(param):
 
 	global prog_counter
 
-	while prog_counter < Value(param).literal:
-		instruction_list.append(Value(0))
-		prog_counter += 1
+	new_pc = Value(param).literal
+	if new_pc is not None:
+		while prog_counter < new_pc:
+			instruction_list.append(Value(0, length = 1))
+			prog_counter += 1
+	else:
+		raise TypeError()
 
 
 def db_directive(param):
@@ -168,16 +172,24 @@ def def_directive(param):
 	params = param_split_regex.split(param)
 	name = params[0]
 	if name not in label_table:
-		label_table[name] = Value(params[1]).literal
+		val = Value(params[1]).literal
+		if val is not None:
+			label_table[name] = val
+		else:
+			raise TypeError()
 	else:
-		raise Exception('Label "%s" already exists' % name)
+		error(current_file, current_line, 'Label already exists "%s"' % name)
 
 
 def rs_directive(param):
 
 	global prog_counter
 
-	prog_counter += Value(param).literal
+	new_pc = Value(param).literal
+	if new_pc is not None:
+		prog_counter += new_pc
+	else:
+		raise TypeError()
 
 
 def include_directive(param):
@@ -251,6 +263,7 @@ class Operand:
 
 	mode_dict = {
 		('#',  None, None, None, 1): 'imm',
+		('#',  None, None, None, 2): 'imm',
 		(None, None, None, None, 1): 'zp',
 		(None, None, 'X',  None, 1): 'zp_x',
 		(None, None, 'Y',  None, 1): 'zp_y',
@@ -281,12 +294,16 @@ class Operand:
 				self.length = 1
 				self.mode = 'off'
 			else:
-				self.length = self.value.length
 				mode_key = (tokens[0], tokens[2], tokens[3].upper() if tokens[3] else None, tokens[4], self.value.length)
 				try:
 					self.mode = Operand.mode_dict[mode_key]
 				except KeyError:
 					error(self.file, self.line, 'Invalid addressing mode')
+
+				if self.mode == 'imm':
+					self.value.length = 1
+
+				self.length = self.value.length
 
 		else:
 			self.value = None
@@ -391,8 +408,6 @@ if __name__ == '__main__':
 
 	print('Pass 1...')
 	parse_file(asm_file_name)
-
-	# pprint.pprint(['%s: %X' % (name, label_table[name]) for name in label_table])
 
 	print('Pass 2...')
 	rom_bytes = []
