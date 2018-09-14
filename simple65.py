@@ -6,8 +6,8 @@ import re
 
 
 token_regex = re.compile('(?:([A-Za-z_][\w\.\-\+]*):)?(?:\s*([^;\s]+))?(?:\s+([^;]*[^;\s]))?(?:\s*(;.*))?')
-operand_regex = re.compile('([#\(])?([^,]+)(\))?(?:,\s*(.+))?(\))?')
-value_regex = re.compile('([<>])?([%$])?(\')?(.+)(\')?')
+operand_regex = re.compile('([#\(])?([^,\(\)]+)(\))?(?:,\s*([^\(\)]+))?(\))?')
+value_regex = re.compile('([<>])?([%$])?([\'"])?([^\'"]+)([\'"])?')
 param_split_regex = re.compile('[,\s]\s*')
 
 file_name_stack = []
@@ -194,14 +194,14 @@ def rs_directive(param):
 
 def include_directive(param):
 
-	parse_file(param)
+	parse_file(param.strip('\'"'))
 
 
 def incbin_directive(param):
 
 	global prog_counter
 
-	with open(param, 'rb') as bin_file:
+	with open(param.strip('\'"'), 'rb') as bin_file:
 		bytes = bin_file.read()
 
 	instruction_list.extend(Value(b, length = 1) for b in bytes)
@@ -227,18 +227,22 @@ class Value:
 		self.file = current_file
 		self.line = current_line
 
-		if isinstance(val_str, int):
-			self.truncation = 0
-			self.literal = val_str
-			self.label = None
-			self.length = length
-		else:
-			tokens = value_regex.match(val_str).groups()
-			self.truncation = 1 if tokens[0] == '>' else -1 if tokens[0] == '<' else 0
-			base = 16 if tokens[1] == '$' else 2 if tokens[1] == '%' else 10 if tokens[3].isdigit() else None
-			self.literal = int(tokens[3], base) if base is not None else ord(tokens[3]) if tokens[2] and tokens[4] else None
-			self.label = tokens[3] if self.literal is None else None
-			self.length = length if length is not None else 1 if self.truncation != 0 or (self.literal is not None and self.literal < 256) else 2
+		try:
+			if isinstance(val_str, int):
+				self.truncation = 0
+				self.literal = val_str
+				self.label = None
+				self.length = length
+			else:
+				tokens = value_regex.match(val_str).groups()
+				self.truncation = 1 if tokens[0] == '>' else -1 if tokens[0] == '<' else 0
+				base = 16 if tokens[1] == '$' else 2 if tokens[1] == '%' else 10 if tokens[3].isdigit() else None
+				literal_val = int(tokens[3], base) if base is not None else ord(tokens[3]) if tokens[2] and tokens[4] else None
+				self.literal = None if literal_val is None else literal_val & 0xFF if self.truncation == -1 else literal_val >> 8 if self.truncation == 1 else literal_val
+				self.label = tokens[3] if self.literal is None else None
+				self.length = length if length is not None else 1 if self.truncation != 0 or (self.literal is not None and self.literal < 256) else 2
+		except ValueError:
+			error(self.file, self.line, 'Bad value')
 
 
 	def get_bytes(self):
@@ -270,6 +274,7 @@ class Operand:
 		(None, None, None, None, 2): 'abs',
 		(None, None, 'X',  None, 2): 'abs_x',
 		(None, None, 'Y',  None, 2): 'abs_y',
+		('(',  ')',  None, None, 1): 'ind',
 		('(',  ')',  None, None, 2): 'ind',
 		('(',  None, 'X',  ')',  1): 'ind_x',
 		('(',  ')',  'Y',  None, 1): 'ind_y',
@@ -302,6 +307,8 @@ class Operand:
 
 				if self.mode == 'imm':
 					self.value.length = 1
+				if self.mode == 'ind':
+					self.value.length = 2
 
 				self.length = self.value.length
 
@@ -319,7 +326,11 @@ class Operand:
 			if self.value.length == 2:
 				bytes = self.value.get_bytes()
 				branch_addr = bytes[0] + (bytes[1] << 8)
-				return [(branch_addr - self.pc - 2) % 256]
+				branch_jump = (branch_addr - self.pc - 2)
+				if -128 <= branch_jump <= 127:
+					return [branch_jump % 256]
+				else:
+					error(self.file, self.line, 'Branch destination out of range')
 			else:
 				return self.value.get_bytes()
 		else:
@@ -342,6 +353,8 @@ class Instruction:
 	def get_bytes(self):
 
 		out_bytes = [self.opcode[self.operand.mode]]
+		if out_bytes[0] is None:
+			error(self.file, self.line, 'Invalid addressing mode')
 		out_bytes.extend(self.operand.get_bytes())
 		return out_bytes
 
@@ -378,7 +391,7 @@ def parse_line(line):
 				try:
 					directive_table[instr_name](param)
 				except TypeError:
-					error(current_file, current_line, 'Value must be literal')
+					error(current_file, current_line, 'Invalid literal')
 			else:
 				error(current_file, current_line, 'Invalid instruction "%s"' % tokens[1])
 
