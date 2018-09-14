@@ -5,11 +5,13 @@ import sys
 import re
 
 
+# Regex for parsing ASM code
 token_regex = re.compile('(?:([A-Za-z_][\w\.\-\+]*):)?(?:\s*([^;\s]+))?(?:\s+([^;]*[^;\s]))?(?:\s*(;.*))?')
 operand_regex = re.compile('([#\(])?([^,\(\)]+)(\))?(?:,\s*([^\(\)]+))?(\))?')
 value_regex = re.compile('([<>])?([%$])?([\'"])?([^\'"]+)([\'"])?')
 param_split_regex = re.compile('[,\s]\s*')
 
+# Global structures
 file_name_stack = []
 line_count_stack = []
 label_table = {}
@@ -17,12 +19,15 @@ instruction_list = []
 prog_counter = 0
 
 
+# Print an error message and quit
 def error(file, line, message):
+
 	print('ERROR!')
 	print('%s (%d): %s' % (file, line, message))
 	exit(-1)
 
 
+# Class to store information about a single opcode and its byte representations
 class Opcode:
 
 	def __init__(self, implied = None, imm = None, zp = None, zp_x = None, zp_y = None, abs = None, abs_x = None, abs_y = None, ind = None, ind_x = None, ind_y = None, off = None):
@@ -47,6 +52,7 @@ class Opcode:
 		return getattr(self, name)
 
 
+# Table relating opcodes to their valid modes and byte representations
 opcode_table = {
 
 	# Math instructions
@@ -125,6 +131,7 @@ opcode_table = {
 }
 
 
+# Directive to set the program counter
 def org_directive(param):
 
 	global prog_counter
@@ -136,6 +143,7 @@ def org_directive(param):
 		raise TypeError()
 
 
+# Directive to pad ROM with zeros
 def pad_directive(param):
 
 	global prog_counter
@@ -149,6 +157,7 @@ def pad_directive(param):
 		raise TypeError()
 
 
+# Directive to output data bytes
 def db_directive(param):
 
 	global prog_counter
@@ -158,6 +167,7 @@ def db_directive(param):
 	instruction_list.extend(Value(p, length = 1) for p in params)
 
 
+# Directive to output data words
 def dw_directive(param):
 
 	global prog_counter
@@ -167,10 +177,12 @@ def dw_directive(param):
 	instruction_list.extend(Value(p, length = 2) for p in params)
 
 
+# Directive to define a constant
 def def_directive(param):
 
 	params = param_split_regex.split(param)
 	name = params[0]
+
 	if name not in label_table:
 		val = Value(params[1]).literal
 		if val is not None:
@@ -181,6 +193,7 @@ def def_directive(param):
 		error(current_file, current_line, 'Label already exists "%s"' % name)
 
 
+# Directive to reserve bytes by incrementing the program counter, but without outputting bytes to ROM
 def rs_directive(param):
 
 	global prog_counter
@@ -192,22 +205,29 @@ def rs_directive(param):
 		raise TypeError()
 
 
+# Directive to include an ASM file
 def include_directive(param):
 
 	parse_file(param.strip('\'"'))
 
 
+# Directive to include a file as binary
 def incbin_directive(param):
 
 	global prog_counter
 
-	with open(param.strip('\'"'), 'rb') as bin_file:
-		bytes = bin_file.read()
+	file_name = param.strip('\'"')
+	try:
+		with open(file_name, 'rb') as bin_file:
+			bytes = bin_file.read()
+	except FileNotFoundError:
+		error(current_file, current_line, 'Binary file not found "%s"' % file_name)
 
 	instruction_list.extend(Value(b, length = 1) for b in bytes)
 	prog_counter += len(bytes)
 
 
+# Table relating directive names to their functions
 directive_table = {
 	'.ORG': org_directive,
 	'.PAD': pad_directive,
@@ -220,6 +240,7 @@ directive_table = {
 }
 
 
+# Class for storing a value which can be used as an operand or binary data
 class Value:
 
 	def __init__(self, val_str, length = None):
@@ -228,43 +249,64 @@ class Value:
 		self.line = current_line
 
 		try:
+
 			if isinstance(val_str, int):
+
+				# If we are passed an integer, just use that as a literal
 				self.truncation = 0
 				self.literal = val_str
 				self.label = None
 				self.length = length
+
 			else:
+
+				# If we are passed a string, parse out the literal or label
 				tokens = value_regex.match(val_str).groups()
+
+				# Check if we want to truncate the value
 				self.truncation = 1 if tokens[0] == '>' else -1 if tokens[0] == '<' else 0
+
+				# Get the base and literal value
 				base = 16 if tokens[1] == '$' else 2 if tokens[1] == '%' else 10 if tokens[3].isdigit() else None
 				literal_val = int(tokens[3], base) if base is not None else ord(tokens[3]) if tokens[2] and tokens[4] else None
 				self.literal = None if literal_val is None else literal_val & 0xFF if self.truncation == -1 else literal_val >> 8 if self.truncation == 1 else literal_val
+
+				# Get the label this value refers to
 				self.label = tokens[3] if self.literal is None else None
+
+				# Get the value's length
 				self.length = length if length is not None else 1 if self.truncation != 0 or (self.literal is not None and self.literal < 256) else 2
+
 		except ValueError:
 			error(self.file, self.line, 'Bad value')
 
 
+	# Return a list of representing this value
 	def get_bytes(self):
 
+		# Use either the literal or the value of a label
 		try:
 			out_val = self.literal if self.literal is not None else label_table[self.label]
 		except KeyError:
 			error(self.file, self.line, 'Label not found "%s"' % self.label)
 
+		# Truncate the value
 		if self.truncation == -1:
 			out_val &= 0xFF
 		elif self.truncation == 1:
 			out_val >>= 8
 
+		# Return the proper length value
 		if self.length == 1:
 			return [out_val]
 		else:
 			return [out_val & 0xFF, out_val >> 8]
 
 
+# Class representing an operand
 class Operand:
 
+	# Table for looking up addressing mode based on the operand
 	mode_dict = {
 		('#',  None, None, None, 1): 'imm',
 		('#',  None, None, None, 2): 'imm',
@@ -288,6 +330,8 @@ class Operand:
 		self.pc = prog_counter
 
 		if oper_str:
+
+			# Parse the operand and get a coresponding value
 			try:
 				tokens = operand_regex.match(oper_str).groups()
 			except AttributeError:
@@ -295,16 +339,20 @@ class Operand:
 
 			self.value = Value(tokens[1])
 
+			# Check if we should use the value as an offset (used for branch instructions)
 			if offset:
 				self.length = 1
 				self.mode = 'off'
 			else:
+
+				# Generate a key to lookup the proper addressing mode in a table
 				mode_key = (tokens[0], tokens[2], tokens[3].upper() if tokens[3] else None, tokens[4], self.value.length)
 				try:
 					self.mode = Operand.mode_dict[mode_key]
 				except KeyError:
 					error(self.file, self.line, 'Invalid addressing mode')
 
+				# Adjust value length for immediate and indirect modes
 				if self.mode == 'imm':
 					self.value.length = 1
 				if self.mode == 'ind':
@@ -318,25 +366,36 @@ class Operand:
 			self.mode = 'implied'
 
 
+	# Return a list of representing this operand
 	def get_bytes(self):
 
+		# Return no operand for implied mode
 		if self.mode == 'implied':
 			return ()
+
+		# Return a program counter offset for offset mode
 		elif self.mode == 'off':
+
 			if self.value.length == 2:
+
 				bytes = self.value.get_bytes()
 				branch_addr = bytes[0] + (bytes[1] << 8)
 				branch_jump = (branch_addr - self.pc - 2)
+
 				if -128 <= branch_jump <= 127:
 					return [branch_jump % 256]
 				else:
 					error(self.file, self.line, 'Branch destination out of range')
+
 			else:
 				return self.value.get_bytes()
+
+		# Return the value's bytes for every other mode
 		else:
 			return self.value.get_bytes()
 
 
+# Class representing an instruction (opcode + operand pair)
 class Instruction:
 
 	def __init__(self, opcode_str, operand_str):
@@ -344,27 +403,31 @@ class Instruction:
 		self.file = current_file
 		self.line = current_line
 
-		self.directive = None
 		self.opcode = opcode_table[opcode_str]
 		self.operand = Operand(operand_str, offset = self.opcode['off'])
 		self.length = self.opcode.length + self.operand.length
 
 
+	# Return a list of representing this instruction
 	def get_bytes(self):
 
 		out_bytes = [self.opcode[self.operand.mode]]
+
 		if out_bytes[0] is None:
 			error(self.file, self.line, 'Invalid addressing mode')
+
 		out_bytes.extend(self.operand.get_bytes())
 		return out_bytes
 
 
+# Parse a line of ASM code
 def parse_line(line):
 
 	global prog_counter
 	global current_file
 	global current_line
 
+	# Get the current file name and line number for error reporting
 	current_file = file_name_stack[-1]
 	current_line = line_count_stack[-1]
 
@@ -372,6 +435,7 @@ def parse_line(line):
 
 	if tokens:
 
+		# Check if we have a label and add it to the label table
 		if tokens[0]:
 			name = tokens[0]
 			if name not in label_table:
@@ -379,32 +443,45 @@ def parse_line(line):
 			else:
 				error(current_file, current_line, 'Label already exists "%s"' % name)
 
+		# Check if we have an instruction
 		if tokens[1]:
 			instr_name = tokens[1].upper()
 			param = tokens[2]
 
 			if instr_name in opcode_table:
+
+				# Parse as an opcode and operand
 				instr = Instruction(instr_name, param)
 				instruction_list.append(instr)
 				prog_counter += instr.length
+
 			elif instr_name in directive_table:
+
+				# Parse as a directive
 				try:
 					directive_table[instr_name](param)
 				except TypeError:
-					error(current_file, current_line, 'Invalid literal')
+					error(current_file, current_line, 'Invalid parameter')
+
 			else:
 				error(current_file, current_line, 'Invalid instruction "%s"' % tokens[1])
 
 
+# Parse an ASM code file
 def parse_file(path):
 
+	# Update the current file and line number for error reporting
 	file_name_stack.append(path)
 	line_count_stack.append(0)
 
-	with open(path, 'r') as src_file:
-		for line in src_file:
-			line_count_stack[-1] += 1
-			parse_line(line)
+	# Open the file and parse each line
+	try:
+		with open(path, 'r') as src_file:
+			for line in src_file:
+				line_count_stack[-1] += 1
+				parse_line(line)
+	except FileNotFoundError:
+		error(current_file, current_line, 'Source file not found "%s"' % path)
 
 	file_name_stack.pop()
 	line_count_stack.pop()
@@ -412,6 +489,7 @@ def parse_file(path):
 
 if __name__ == '__main__':
 
+	# Get command line arguments
 	try:
 		asm_file_name = sys.argv[1]
 		out_file_name = sys.argv[2]
@@ -419,17 +497,26 @@ if __name__ == '__main__':
 		print('usage: simple65.py <input file> <output file>')
 		exit(-1)
 
+	# Pass 1: Parse each line of ASM code into a list of instructions
 	print('Pass 1...')
 	parse_file(asm_file_name)
 
+	# Pass 2: Evaluate each instruction or value into a list of bytes
 	print('Pass 2...')
 	rom_bytes = []
+
 	for instr in instruction_list:
 		bytes = instr.get_bytes()
+
 		if any(b > 256 for b in bytes):
-			error(instr.file, instr.line, 'Value out of range')
+			error(instr.file, instr.line, 'Byte out of range')
+
 		rom_bytes.extend(bytes)
 
+	# Write ROM bytes out to a file
 	print('Writing %d bytes to %s' % (len(rom_bytes), out_file_name))
-	with open(out_file_name, 'wb') as rom_file:
-		rom_file.write(bytearray(rom_bytes))
+	try:
+		with open(out_file_name, 'wb') as rom_file:
+			rom_file.write(bytearray(rom_bytes))
+	except PermissionError:
+		print('ERROR: Output file could not be opened')
