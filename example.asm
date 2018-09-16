@@ -17,10 +17,13 @@
 frameCounter: .rs 1
 
 
-; Start of PRG
+; Start of PRG (code/data)
 	.org $C000
 
+; This routine runs when the NES is powered on or reset
 RESET:
+
+; Set up the stack and PPU ports
 	SEI
 	CLD
 	LDX #$40
@@ -32,28 +35,32 @@ RESET:
 	STX $2001
 	STX $4010
 
+; Wait for the first vblank
 vblankwait1:
 	BIT $2002
 	BPL vblankwait1
 
+; Clear all RAM
 clrmem:
 	LDA #$00
-	STA $0000, x
-	STA $0100, x
-	STA $0300, x
-	STA $0400, x
-	STA $0500, x
-	STA $0600, x
-	STA $0700, x
+	STA $0000, X
+	STA $0100, X
+	STA $0300, X
+	STA $0400, X
+	STA $0500, X
+	STA $0600, X
+	STA $0700, X
 	LDA #$FE
-	STA $0200, x
+	STA $0200, X
 	INX
 	BNE clrmem
 
+; Wait for second vblank
 vblankwait2:
 	BIT $2002
 	BPL vblankwait2
 
+; Load color palettes for our sprite
 LoadPalettes:
 	LDA $2002
 	LDA #$3F
@@ -62,60 +69,86 @@ LoadPalettes:
 	STA $2006
 	LDX #$00
 LoadPalettesLoop:
-	LDA palettes, x
+	LDA palettes, X
 	STA $2007
 	INX
 	CPX #$20
 	BNE LoadPalettesLoop
 
-	LDA #$00
+; Initialize the frame counter
+	LDA #$80
 	STA frameCounter
 
+; Enable sprites and NMI
 	LDA #%10010000
 	STA $2000
 	LDA #%00011110
 	STA $2001
 
 
+; Endless loop, the Non-Maskable Interrupt does most of the work
 EndlessLoop:
 	JMP EndlessLoop
 
 
-; Fires on vblank
+; Non-Maskable Interrupt, fires on vblank
 NMI:
+
+; Push registers and flags onto the stack
 	PHA
 	TXA
 	PHA
 	TYA
 	PHA
 
+	LDX frameCounter
+	INX
+	STX frameCounter
+	LDY #$00
+
+SpriteLoop:
+	LDA sinTable, X
+	STA $0200, Y
+	INY
+
+	LDA sprites, Y
+	STA $0200, Y
+	INY
+
+	LDA sprites, Y
+	STA $0200, Y
+	INY
+
+	LDA cosTable, X
+	STA $0200, Y
+	INY
+
+	TXA
+	CLC
+	ADC #$0A
+	TAX
+	CPY #$18
+	BNE SpriteLoop
+
+; Copy sprite data to the PPU
 	LDA $2002
 	LDA #$00
 	STA $2003
 	LDA #$02
 	STA $4014
 
+; Update the PPUCTRL and PPUMASK ports
 	LDA #%10010000
 	STA $2000
 	LDA #%00011110
 	STA $2001
 
+; Update scroll
 	LDA #$00
 	STA $2005
 	STA $2005
 
-	LDX frameCounter
-	LDA sinTable, x
-	STA $0200
-	LDA cosTable, x
-	STA $0203
-	INX
-	STX frameCounter
-
-	LDA #$00
-	STA $0201
-	STA $0202
-
+; Pull registers and flags back off the stack
 	PLA
 	TAY
 	PLA
@@ -124,53 +157,65 @@ NMI:
 	RTI
 
 
+; Table of Y-positions (sine)
 sinTable:
-.db $80, $82, $83, $85, $86, $88, $89, $8B, $8C, $8E, $90, $91, $93, $94, $96, $97
-.db $98, $9A, $9B, $9D, $9E, $A0, $A1, $A2, $A4, $A5, $A6, $A7, $A9, $AA, $AB, $AC
-.db $AD, $AE, $AF, $B0, $B1, $B2, $B3, $B4, $B5, $B6, $B7, $B8, $B8, $B9, $BA, $BB
-.db $BB, $BC, $BC, $BD, $BD, $BE, $BE, $BE, $BF, $BF, $BF, $C0, $C0, $C0, $C0, $C0
-.db $C0, $C0, $C0, $C0, $C0, $C0, $BF, $BF, $BF, $BE, $BE, $BE, $BD, $BD, $BC, $BC
-.db $BB, $BB, $BA, $B9, $B8, $B8, $B7, $B6, $B5, $B4, $B3, $B2, $B1, $B0, $AF, $AE
-.db $AD, $AC, $AB, $AA, $A9, $A7, $A6, $A5, $A4, $A2, $A1, $A0, $9E, $9D, $9B, $9A
-.db $98, $97, $96, $94, $93, $91, $90, $8E, $8C, $8B, $89, $88, $86, $85, $83, $82
-.db $80, $7E, $7D, $7B, $7A, $78, $77, $75, $74, $72, $70, $6F, $6D, $6C, $6A, $69
-.db $68, $66, $65, $63, $62, $60, $5F, $5E, $5C, $5B, $5A, $59, $57, $56, $55, $54
-.db $53, $52, $51, $50, $4F, $4E, $4D, $4C, $4B, $4A, $49, $48, $48, $47, $46, $45
-.db $45, $44, $44, $43, $43, $42, $42, $42, $41, $41, $41, $40, $40, $40, $40, $40
-.db $40, $40, $40, $40, $40, $40, $41, $41, $41, $42, $42, $42, $43, $43, $44, $44
-.db $45, $45, $46, $47, $48, $48, $49, $4A, $4B, $4C, $4D, $4E, $4F, $50, $51, $52
-.db $53, $54, $55, $56, $57, $59, $5A, $5B, $5C, $5E, $5F, $60, $62, $63, $65, $66
-.db $68, $69, $6A, $6C, $6D, $6F, $70, $72, $74, $75, $77, $78, $7A, $7B, $7D, $7E
+	.db $80, $82, $83, $85, $86, $88, $89, $8B, $8C, $8E, $90, $91, $93, $94, $96, $97
+	.db $98, $9A, $9B, $9D, $9E, $A0, $A1, $A2, $A4, $A5, $A6, $A7, $A9, $AA, $AB, $AC
+	.db $AD, $AE, $AF, $B0, $B1, $B2, $B3, $B4, $B5, $B6, $B7, $B8, $B8, $B9, $BA, $BB
+	.db $BB, $BC, $BC, $BD, $BD, $BE, $BE, $BE, $BF, $BF, $BF, $C0, $C0, $C0, $C0, $C0
+	.db $C0, $C0, $C0, $C0, $C0, $C0, $BF, $BF, $BF, $BE, $BE, $BE, $BD, $BD, $BC, $BC
+	.db $BB, $BB, $BA, $B9, $B8, $B8, $B7, $B6, $B5, $B4, $B3, $B2, $B1, $B0, $AF, $AE
+	.db $AD, $AC, $AB, $AA, $A9, $A7, $A6, $A5, $A4, $A2, $A1, $A0, $9E, $9D, $9B, $9A
+	.db $98, $97, $96, $94, $93, $91, $90, $8E, $8C, $8B, $89, $88, $86, $85, $83, $82
+	.db $80, $7E, $7D, $7B, $7A, $78, $77, $75, $74, $72, $70, $6F, $6D, $6C, $6A, $69
+	.db $68, $66, $65, $63, $62, $60, $5F, $5E, $5C, $5B, $5A, $59, $57, $56, $55, $54
+	.db $53, $52, $51, $50, $4F, $4E, $4D, $4C, $4B, $4A, $49, $48, $48, $47, $46, $45
+	.db $45, $44, $44, $43, $43, $42, $42, $42, $41, $41, $41, $40, $40, $40, $40, $40
+	.db $40, $40, $40, $40, $40, $40, $41, $41, $41, $42, $42, $42, $43, $43, $44, $44
+	.db $45, $45, $46, $47, $48, $48, $49, $4A, $4B, $4C, $4D, $4E, $4F, $50, $51, $52
+	.db $53, $54, $55, $56, $57, $59, $5A, $5B, $5C, $5E, $5F, $60, $62, $63, $65, $66
+	.db $68, $69, $6A, $6C, $6D, $6F, $70, $72, $74, $75, $77, $78, $7A, $7B, $7D, $7E
 
+; Table of X-positions (cosine)
 cosTable:
-.db $C0, $C0, $C0, $C0, $C0, $C0, $BF, $BF, $BF, $BE, $BE, $BE, $BD, $BD, $BC, $BC
-.db $BB, $BB, $BA, $B9, $B8, $B8, $B7, $B6, $B5, $B4, $B3, $B2, $B1, $B0, $AF, $AE
-.db $AD, $AC, $AB, $AA, $A9, $A7, $A6, $A5, $A4, $A2, $A1, $A0, $9E, $9D, $9B, $9A
-.db $98, $97, $96, $94, $93, $91, $90, $8E, $8C, $8B, $89, $88, $86, $85, $83, $82
-.db $80, $7E, $7D, $7B, $7A, $78, $77, $75, $74, $72, $70, $6F, $6D, $6C, $6A, $69
-.db $68, $66, $65, $63, $62, $60, $5F, $5E, $5C, $5B, $5A, $59, $57, $56, $55, $54
-.db $53, $52, $51, $50, $4F, $4E, $4D, $4C, $4B, $4A, $49, $48, $48, $47, $46, $45
-.db $45, $44, $44, $43, $43, $42, $42, $42, $41, $41, $41, $40, $40, $40, $40, $40
-.db $40, $40, $40, $40, $40, $40, $41, $41, $41, $42, $42, $42, $43, $43, $44, $44
-.db $45, $45, $46, $47, $48, $48, $49, $4A, $4B, $4C, $4D, $4E, $4F, $50, $51, $52
-.db $53, $54, $55, $56, $57, $59, $5A, $5B, $5C, $5E, $5F, $60, $62, $63, $65, $66
-.db $68, $69, $6A, $6C, $6D, $6F, $70, $72, $74, $75, $77, $78, $7A, $7B, $7D, $7E
-.db $80, $82, $83, $85, $86, $88, $89, $8B, $8C, $8E, $90, $91, $93, $94, $96, $97
-.db $98, $9A, $9B, $9D, $9E, $A0, $A1, $A2, $A4, $A5, $A6, $A7, $A9, $AA, $AB, $AC
-.db $AD, $AE, $AF, $B0, $B1, $B2, $B3, $B4, $B5, $B6, $B7, $B8, $B8, $B9, $BA, $BB
-.db $BB, $BC, $BC, $BD, $BD, $BE, $BE, $BE, $BF, $BF, $BF, $C0, $C0, $C0, $C0, $C0
+	.db $C0, $C0, $C0, $C0, $C0, $C0, $BF, $BF, $BF, $BE, $BE, $BE, $BD, $BD, $BC, $BC
+	.db $BB, $BB, $BA, $B9, $B8, $B8, $B7, $B6, $B5, $B4, $B3, $B2, $B1, $B0, $AF, $AE
+	.db $AD, $AC, $AB, $AA, $A9, $A7, $A6, $A5, $A4, $A2, $A1, $A0, $9E, $9D, $9B, $9A
+	.db $98, $97, $96, $94, $93, $91, $90, $8E, $8C, $8B, $89, $88, $86, $85, $83, $82
+	.db $80, $7E, $7D, $7B, $7A, $78, $77, $75, $74, $72, $70, $6F, $6D, $6C, $6A, $69
+	.db $68, $66, $65, $63, $62, $60, $5F, $5E, $5C, $5B, $5A, $59, $57, $56, $55, $54
+	.db $53, $52, $51, $50, $4F, $4E, $4D, $4C, $4B, $4A, $49, $48, $48, $47, $46, $45
+	.db $45, $44, $44, $43, $43, $42, $42, $42, $41, $41, $41, $40, $40, $40, $40, $40
+	.db $40, $40, $40, $40, $40, $40, $41, $41, $41, $42, $42, $42, $43, $43, $44, $44
+	.db $45, $45, $46, $47, $48, $48, $49, $4A, $4B, $4C, $4D, $4E, $4F, $50, $51, $52
+	.db $53, $54, $55, $56, $57, $59, $5A, $5B, $5C, $5E, $5F, $60, $62, $63, $65, $66
+	.db $68, $69, $6A, $6C, $6D, $6F, $70, $72, $74, $75, $77, $78, $7A, $7B, $7D, $7E
+	.db $80, $82, $83, $85, $86, $88, $89, $8B, $8C, $8E, $90, $91, $93, $94, $96, $97
+	.db $98, $9A, $9B, $9D, $9E, $A0, $A1, $A2, $A4, $A5, $A6, $A7, $A9, $AA, $AB, $AC
+	.db $AD, $AE, $AF, $B0, $B1, $B2, $B3, $B4, $B5, $B6, $B7, $B8, $B8, $B9, $BA, $BB
+	.db $BB, $BC, $BC, $BD, $BD, $BE, $BE, $BE, $BF, $BF, $BF, $C0, $C0, $C0, $C0, $C0
 
 
+; Color palette values
 palettes:
 	.db $0F, $0F, $0F, $0F
 	.db $0F, $0F, $0F, $0F
 	.db $0F, $0F, $0F, $0F
 	.db $0F, $0F, $0F, $0F
 
-	.db $0F, $2A, $0F, $0F
+	.db $02, $2A, $0F, $0F
+	.db $0F, $28, $0F, $0F
+	.db $0F, $24, $0F, $0F
 	.db $0F, $0F, $0F, $0F
-	.db $0F, $0F, $0F, $0F
-	.db $0F, $0F, $0F, $0F
+
+; Sprite values
+sprites:
+	.db $00, 'C', $00, $00
+	.db $00, 'I', $01, $00
+	.db $00, 'R', $02, $00
+	.db $00, 'C', $00, $00
+	.db $00, 'L', $01, $00
+	.db $00, 'E', $02, $00
 
 
 ; Interrupt vectors
@@ -180,6 +225,6 @@ palettes:
 	.dw 0
 
 
-; Start of CHR
+; Start of CHR (graphics)
 	.org $0000
 	.incbin "example.chr"
