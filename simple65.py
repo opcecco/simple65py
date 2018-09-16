@@ -261,7 +261,10 @@ class Value:
 			else:
 
 				# If we are passed a string, parse out the literal or label
-				tokens = value_regex.match(val_str).groups()
+				try:
+					tokens = value_regex.match(val_str).groups()
+				except AttributeError:
+					error(self.file, self.line, 'Unable to parse value')
 
 				# Check if we want to truncate the value
 				self.truncation = 1 if tokens[0] == '>' else -1 if tokens[0] == '<' else 0
