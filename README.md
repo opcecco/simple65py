@@ -1,7 +1,7 @@
 # simple65py
 
 _simple65py_ is a simple assembler for the MOS 6502 CPU.
-It was created to assemble games for the Nintendo Entertainment System (NES), but should work for any system that uses the 6502 as it's main processor.
+It was created to compile games for the Nintendo Entertainment System (NES), but should work for any system that uses the 6502 as it's main processor.
 
 # Usage
 
@@ -80,7 +80,7 @@ Defines a label as the specified value.
 .INCLUDE "filename"
 ```
 
-Includes the specified file and parse it as assembly code.
+Includes the specified file and parses it as assembly code.
 
 ### .INCBIN (Include binary)
 
