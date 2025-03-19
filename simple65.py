@@ -17,6 +17,7 @@ file_name_stack = []
 line_count_stack = []
 label_table = {}
 instruction_list = []
+instr_strings = {}
 prog_counter = 0
 
 
@@ -106,13 +107,13 @@ class Value:
         except ValueError:
             error(self.file, self.line, 'Bad value')
 
-    # Return a list of representing this value
+    # Return a list of bytes representing this value
     def get_bytes(self):
         # Use either the literal or the value of a label
         try:
             out_val = self.literal if self.literal is not None else label_table[self.label]
         except KeyError:
-            error(self.file, self.line, 'Label not found "%s"' % self.label)
+            error(self.file, self.line, f'Label not found "{self.label}"')
 
         # Truncate the value
         if self.truncation == -1:
@@ -189,7 +190,7 @@ class Operand:
             self.length = 0
             self.mode = 'implied'
 
-    # Return a list of representing this operand
+    # Return a list of bytes representing this operand
     def get_bytes(self):
         if self.mode == 'implied':
             # Return no operand for implied mode
@@ -218,11 +219,12 @@ class Instruction:
     def __init__(self, opcode_str, operand_str):
         self.file = current_file
         self.line = current_line
-        self.opcode = opcode_table[opcode_str]
+        self.opcode_str = opcode_str
+        self.opcode = opcode_table[self.opcode_str]
         self.operand = Operand(operand_str, offset=self.opcode['off'])
         self.length = self.opcode.length + self.operand.length
 
-    # Return a list of representing this instruction
+    # Return a list of bytes representing this instruction
     def get_bytes(self):
         out_bytes = [self.opcode[self.operand.mode]]
         if out_bytes[0] is None:
@@ -230,11 +232,32 @@ class Instruction:
         out_bytes.extend(self.operand.get_bytes())
         return out_bytes
 
+    # Return a debug description of the instruction
+    def get_description(self):
+        return f'{self.opcode_str} {self.operand.mode}'
+
+
+# Class for storing a raw list of values (used for directives)
+class ValueList:
+
+    def __init__(self, values):
+        self.file = current_file
+        self.line = current_line
+        self.values = values
+
+    # Return a list of bytes representing all contained values
+    def get_bytes(self):
+        return [byte for val in self.values for byte in val.get_bytes()]
+
+    # Return a debug description of the value list
+    def get_description(self):
+        return 'values'
+
 
 # Print an error message and quit
 def error(file, line, message):
     print('ERROR!')
-    print('%s (%d): %s' % (file, line, message))
+    print(f'{file} ({line}): {message}')
     exit(-1)
 
 
@@ -253,9 +276,11 @@ def pad_directive(param):
     global prog_counter
     new_pc = Value(param).literal
     if new_pc is not None:
+        value_list = []
         while prog_counter < new_pc:
-            instruction_list.append(Value(0, length=1))
+            value_list.append(Value(0, length=1))
             prog_counter += 1
+        instruction_list.append(ValueList(value_list))
     else:
         raise TypeError()
 
@@ -265,7 +290,7 @@ def db_directive(param):
     global prog_counter
     params = param_split_regex.split(param)
     prog_counter += len(params)
-    instruction_list.extend(Value(p, length=1) for p in params)
+    instruction_list.append(ValueList([Value(p, length=1) for p in params]))
 
 
 # Directive to output data words
@@ -273,7 +298,7 @@ def dw_directive(param):
     global prog_counter
     params = param_split_regex.split(param)
     prog_counter += len(params)
-    instruction_list.extend(Value(p, length=2) for p in params)
+    instruction_list.append(ValueList([Value(p, length=2) for p in params]))
 
 
 # Directive to define a constant
@@ -287,7 +312,7 @@ def def_directive(param):
         else:
             raise TypeError()
     else:
-        error(current_file, current_line, 'Label already exists "%s"' % name)
+        error(current_file, current_line, f'Label already exists "{name}"')
 
 
 # Directive to reserve bytes by incrementing the program counter, but without outputting bytes to ROM
@@ -314,8 +339,8 @@ def incbin_directive(param):
             bytes = bin_file.read()
     except FileNotFoundError:
         error(current_file, current_line,
-              'Binary file not found "%s"' % file_name)
-    instruction_list.extend(Value(b, length=1) for b in bytes)
+              f'Binary file not found "{file_name}"')
+    instruction_list.append(ValueList([Value(b, length=1) for b in bytes]))
     prog_counter += len(bytes)
 
 
@@ -420,6 +445,7 @@ def parse_line(line):
     current_file = file_name_stack[-1]
     current_line = line_count_stack[-1]
 
+    instr_strings[(current_file, current_line)] = line
     tokens = token_regex.match(line.strip()).groups()
 
     if tokens:
@@ -430,7 +456,7 @@ def parse_line(line):
                 label_table[name] = prog_counter
             else:
                 error(current_file, current_line,
-                      'Label already exists "%s"' % name)
+                      f'Label already exists "{name}"')
 
         # Check if we have an instruction
         if tokens[1]:
@@ -451,7 +477,7 @@ def parse_line(line):
                     error(current_file, current_line, 'Invalid parameter')
             else:
                 error(current_file, current_line,
-                      'Invalid instruction "%s"' % tokens[1])
+                      f'Invalid instruction "{tokens[1]}"')
 
 
 # Parse an ASM code file
@@ -467,7 +493,7 @@ def parse_file(path):
                 line_count_stack[-1] += 1
                 parse_line(line)
     except FileNotFoundError:
-        error(current_file, current_line, 'Source file not found "%s"' % path)
+        error(current_file, current_line, f'Source file not found "{path}"')
 
     file_name_stack.pop()
     line_count_stack.pop()
@@ -478,8 +504,9 @@ if __name__ == '__main__':
     try:
         asm_file_name = sys.argv[1]
         out_file_name = sys.argv[2]
+        debug_file_name = sys.argv[3] if len(sys.argv) > 3 else None
     except IndexError:
-        print('usage: simple65.py <input file> <output file>')
+        print('usage: simple65.py <input_file> <output_file> [debug_file]')
         exit(-1)
 
     # Pass 1: Parse each line of ASM code into a list of instructions
@@ -489,17 +516,40 @@ if __name__ == '__main__':
     # Pass 2: Evaluate each instruction or value into a list of bytes
     print('Pass 2...')
     rom_bytes = []
+    debug_info = []
 
     for instr in instruction_list:
+        # Get bytes for the current instruction
         bytes = instr.get_bytes()
         if any(b > 256 for b in bytes):
             error(instr.file, instr.line, 'Byte out of range')
         rom_bytes.extend(bytes)
 
+        if debug_file_name is not None:
+            # Generate debug info for the current instruction
+            pos = len(rom_bytes) - len(bytes)
+            key = (instr.file, instr.line)
+            text = instr_strings[key].split(';')[0].strip()
+            desc = instr.get_description()
+            byte_string = ' '.join(f'{b:02X}' for b in bytes[:32])
+            if len(bytes) > 32:
+                byte_string += ' ...'
+            debug_line = f'{pos:04X}:{instr.file}:{instr.line} "{text}" ({desc}) -> {byte_string}\n'
+            debug_info.append(debug_line)
+
     # Write ROM bytes out to a file
-    print('Writing %d bytes to %s' % (len(rom_bytes), out_file_name))
+    print(f'Writing {len(rom_bytes)} bytes to {out_file_name}')
     try:
         with open(out_file_name, 'wb') as rom_file:
             rom_file.write(bytearray(rom_bytes))
     except PermissionError:
         print('ERROR: Output file could not be opened')
+
+    if debug_file_name is not None:
+        # Write debug info out to a file
+        print(f'Writing debug output to {debug_file_name}')
+        try:
+            with open(debug_file_name, 'w') as debug_file:
+                debug_file.writelines(debug_info)
+        except PermissionError:
+            print('ERROR: Debug file could not be opened')

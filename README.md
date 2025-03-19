@@ -6,9 +6,9 @@ It was created to compile games for the Nintendo Entertainment System (NES), but
 # Usage
 
 ```
-python3 simple65.py INPUTFILE OUTPUTFILE
+python3 simple65.py INPUTFILE OUTPUTFILE [DEBUGFILE]
 ```
-Where INPUTFILE is a 6502 assembly code file, and OUTPUTFILE is the resulting binary file.
+Where INPUTFILE is a 6502 assembly code file, and OUTPUTFILE is the resulting binary file. Optionally, DEBUGFILE can be specified to output debug information.
 
 Included is some example code that assembles into an NES binary. To assemble the example code:
 ```
